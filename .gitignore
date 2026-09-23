@@ -1,0 +1,25 @@
+# Binaries & build artifacts
+bin/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# SQLite databases & journals
+*.db
+*.db-wal
+*.db-shm
+chassis.db*
+
+# Sensitive local configurations / secrets
+.env
+*.local
+credentials.json
+
+# Operating System & IDE artifacts
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
