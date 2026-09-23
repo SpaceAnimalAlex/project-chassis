@@ -15,20 +15,22 @@ import (
 
 // SyncWorker manages background mail polling and transactional ingestion.
 type SyncWorker struct {
-	provider     MailProvider
-	repo         *db.Repository
-	threader     *Threader
-	pollInterval time.Duration
+	provider      MailProvider
+	repo          *db.Repository
+	threader      *Threader
+	notifier      core.Notifier
+	pollInterval  time.Duration
 	defaultPrefix string
-	logger       *slog.Logger
-	mu           sync.Mutex
-	running      bool
+	logger        *slog.Logger
+	mu            sync.Mutex
+	running       bool
 }
 
 // Config defines worker parameters.
 type WorkerConfig struct {
 	Provider      MailProvider
 	Repository    *db.Repository
+	Notifier      core.Notifier // Optional: broadcast hook for live SSE streams
 	PollInterval  time.Duration
 	DefaultPrefix string // e.g. "HD" or "WO"
 	Logger        *slog.Logger
@@ -50,6 +52,7 @@ func NewSyncWorker(cfg WorkerConfig) *SyncWorker {
 		provider:      cfg.Provider,
 		repo:          cfg.Repository,
 		threader:      NewThreader(cfg.Repository.DB()),
+		notifier:      cfg.Notifier,
 		pollInterval:  cfg.PollInterval,
 		defaultPrefix: cfg.DefaultPrefix,
 		logger:        cfg.Logger,
@@ -168,7 +171,10 @@ func (w *SyncWorker) ingestMessage(ctx context.Context, msg InboundMessage) erro
 		return fmt.Errorf("correlation failed: %w", err)
 	}
 
-	return w.repo.DB().WithTx(ctx, func(tx *sql.Tx) error {
+	var notifiedMsg *core.ThreadMessage
+	var notifiedWorkItemID int64
+
+	err = w.repo.DB().WithTx(ctx, func(tx *sql.Tx) error {
 		var workItemID int64
 
 		if corr.Stage == "NEW_ITEM" {
@@ -213,6 +219,20 @@ func (w *SyncWorker) ingestMessage(ctx context.Context, msg InboundMessage) erro
 			return nil
 		}
 
+		msgID, _ := res.LastInsertId()
+		notifiedWorkItemID = workItemID
+		extID := msg.ExternalMessageID
+		notifiedMsg = &core.ThreadMessage{
+			ID:                msgID,
+			WorkItemID:        workItemID,
+			AuthorUserID:      nil,
+			SenderEmail:       msg.SenderEmail,
+			Body:              body,
+			IsInternal:        false,
+			ExternalMessageID: &extID,
+			CreatedAt:         time.Now().UTC(),
+		}
+
 		// If existing ticket was in PENDING_USER or RESOLVED, reopen to OPEN
 		if corr.Stage != "NEW_ITEM" {
 			_, err = tx.ExecContext(ctx, `
@@ -239,6 +259,17 @@ func (w *SyncWorker) ingestMessage(ctx context.Context, msg InboundMessage) erro
 		_, err = tx.ExecContext(ctx, insertAudit, workItemID, core.ActionMailCorrelated, core.DetailsToJSON(auditDetail))
 		return err
 	})
+
+	if err != nil {
+		return err
+	}
+
+	// Alert active live SSE streams of this new inbound message
+	if w.notifier != nil && notifiedMsg != nil {
+		w.notifier.NotifyNewMessage(notifiedWorkItemID, *notifiedMsg)
+	}
+
+	return nil
 }
 
 func (w *SyncWorker) generateItemCode(ctx context.Context, tx *sql.Tx, prefix string) (string, error) {

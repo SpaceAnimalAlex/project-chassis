@@ -107,6 +107,20 @@ func TestThreaderCorrelation(t *testing.T) {
 	}
 }
 
+type mockNotifier struct {
+	notifications []struct {
+		itemID int64
+		msg    core.ThreadMessage
+	}
+}
+
+func (m *mockNotifier) NotifyNewMessage(workItemID int64, msg core.ThreadMessage) {
+	m.notifications = append(m.notifications, struct {
+		itemID int64
+		msg    core.ThreadMessage
+	}{itemID: workItemID, msg: msg})
+}
+
 func TestSyncWorkerIngestion(t *testing.T) {
 	database, repo := setupTestRepo(t)
 	defer database.Close()
@@ -126,9 +140,12 @@ func TestSyncWorkerIngestion(t *testing.T) {
 		},
 	}
 
+	notifier := &mockNotifier{}
+
 	worker := NewSyncWorker(WorkerConfig{
 		Provider:      mock,
 		Repository:    repo,
+		Notifier:      notifier,
 		DefaultPrefix: "CW",
 	})
 
@@ -158,13 +175,28 @@ func TestSyncWorkerIngestion(t *testing.T) {
 		t.Fatalf("unexpected subject: %s", items[0].Subject)
 	}
 
-	// Test idempotency: re-running sync with same message should not duplicate
+	// Verify Notifier was called for live SSE streams
+	if len(notifier.notifications) != 1 {
+		t.Fatalf("expected exactly 1 notification, got %d", len(notifier.notifications))
+	}
+	notif := notifier.notifications[0]
+	if notif.itemID != items[0].ID {
+		t.Fatalf("expected notification item ID %d, got %d", items[0].ID, notif.itemID)
+	}
+	if notif.msg.Body != "Pothole on Main St." {
+		t.Fatalf("unexpected notification body: %s", notif.msg.Body)
+	}
+
+	// Test idempotency: re-running sync with same message should not duplicate or notify
 	if err := worker.SyncOnce(ctx); err != nil {
 		t.Fatalf("Second SyncOnce failed: %v", err)
 	}
 	itemsAfter, _ := repo.ListQueue(ctx, core.QueueFilter{})
 	if len(itemsAfter) != 1 {
 		t.Fatalf("expected still 1 item after duplicate sync, got %d", len(itemsAfter))
+	}
+	if len(notifier.notifications) != 1 {
+		t.Fatalf("expected no extra notifications on duplicate sync, got %d", len(notifier.notifications))
 	}
 }
 

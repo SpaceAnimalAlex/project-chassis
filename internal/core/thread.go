@@ -40,3 +40,10 @@ func SanitizeForRequester(messages []ThreadMessage) []ThreadMessage {
 	}
 	return publicMsgs
 }
+
+// Notifier defines the broadcast seam for real-time thread event distribution.
+// Implemented by the SSE hub in internal/web to alert connected browsers of new messages.
+type Notifier interface {
+	NotifyNewMessage(workItemID int64, msg ThreadMessage)
+}
+
