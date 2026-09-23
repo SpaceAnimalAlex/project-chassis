@@ -113,3 +113,14 @@ Then visit `http://localhost:8080`.
 * **Mail providers:** Microsoft Graph done; Gmail and local SMTP/IMAP relay adapters not yet built.
 * **Implements:** IT, Edu, Civic, and MRO are registered and validate their own asset metadata.
 * **Auth:** password + session-based, multi-device by design, no role-based UI restrictions yet beyond the `ADMIN`/`AGENT`/`READONLY` roles on the model.
+
+## License
+
+Project Chassis is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**. See [LICENSE](LICENSE) for the complete legal text.
+
+### The Economic Model of Chassis
+Chassis is free as in freedom, not free as in uncompensated labor:
+1. **For Organizations & Shops:** Deploy it once on hardware you own ($300 mini-PC / local server). Zero recurring seat licenses, zero mandatory cloud fees.
+2. **For Independent Sysadmins & Developers:** You are enthusiastically encouraged to charge real money for setup, deployment, hardware appliances, ongoing maintenance retainers, and bespoke Implement development.
+3. **Against Digital Feudalism:** Any entity attempting to run Chassis as a closed, proprietary multi-tenant cloud service is legally required to make their complete source code modifications available to all network users.
+
