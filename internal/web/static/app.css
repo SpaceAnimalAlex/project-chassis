@@ -1,0 +1,279 @@
+/* Project Chassis — minimal, no-build-step styling. Kept deliberately plain:
+   this ships inside the single binary and is read by whoever inherits this
+   codebase in a decade, not by a designer with a build pipeline. */
+
+:root {
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #666666;
+  --border: #dddddd;
+  --accent: #2b5fb8;
+  --internal-bg: #fff4d6;
+  --internal-border: #d9a441;
+  --danger: #b8302b;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a;
+    --fg: #e8e8e8;
+    --muted: #999999;
+    --border: #33363c;
+    --accent: #6c9bf2;
+    --internal-bg: #3a2f14;
+    --internal-border: #b8862f;
+    --danger: #e0645f;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.chassis-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.chassis-nav__brand {
+  font-weight: 700;
+  color: var(--fg);
+  text-decoration: none;
+  letter-spacing: 0.02em;
+}
+
+.chassis-nav__status { color: var(--muted); }
+.chassis-nav__status.chassis-status--ok { color: #3ba15a; }
+.chassis-nav__status.chassis-status--down { color: var(--danger); }
+
+.chassis-main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1.25rem;
+}
+
+.chassis-toolbar {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.chassis-toolbar input,
+.chassis-toolbar select {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.chassis-toolbar input { flex: 1; }
+
+.chassis-hint {
+  align-self: center;
+  color: var(--muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.chassis-queue {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.chassis-queue th {
+  text-align: left;
+  font-size: 0.8rem;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  padding: 0.5rem;
+}
+
+.chassis-queue td {
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.chassis-queue tr.chassis-row--selected td {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.chassis-empty {
+  color: var(--muted);
+  padding: 1rem 0.5rem;
+}
+
+.chassis-badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
+
+.chassis-item-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.chassis-item-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.chassis-item-meta {
+  margin: 0.75rem 0;
+  color: var(--muted);
+}
+
+.chassis-lock-warning {
+  background: var(--internal-bg);
+  border: 1px solid var(--internal-border);
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.chassis-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin: 1rem 0;
+}
+
+.chassis-message {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+}
+
+.chassis-message--internal {
+  background: var(--internal-bg);
+  border-color: var(--internal-border);
+}
+
+.chassis-message__meta {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.chassis-message__lock {
+  color: var(--internal-border);
+}
+
+.chassis-composer {
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+
+.chassis-composer textarea {
+  width: 100%;
+  padding: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: inherit;
+  resize: vertical;
+}
+
+.chassis-composer__toggle {
+  margin-bottom: 0.4rem;
+  font-size: 0.9rem;
+}
+
+.chassis-composer__actions {
+  margin-top: 0.5rem;
+  display: flex;
+  justify-content: flex-end;
+}
+
+button {
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+button:hover { filter: brightness(0.95); }
+
+.chassis-login {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+}
+
+.chassis-login__card {
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
+}
+
+.chassis-login__card h1 {
+  margin: 0 0 0.25rem 0;
+}
+
+.chassis-login__card label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.9rem;
+}
+
+.chassis-login__card input {
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: inherit;
+}
+
+.chassis-login__error {
+  color: var(--danger);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.chassis-session-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0;
+}
+
+.chassis-session-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}

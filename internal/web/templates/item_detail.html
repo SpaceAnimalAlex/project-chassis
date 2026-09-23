@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chassis — Item</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body data-page="item">
+{{template "nav" .}}
+<main class="chassis-main">
+  <div id="lock-warning" class="chassis-lock-warning" hidden></div>
+
+  <header class="chassis-item-header">
+    <h1 id="item-code">…</h1>
+    <span id="item-status" class="chassis-badge"></span>
+    <div class="chassis-item-actions">
+      <select id="status-select"></select>
+      <button id="assign-btn" type="button">Assign to me</button>
+    </div>
+  </header>
+
+  <section class="chassis-item-meta">
+    <div><strong>Requester:</strong> <span id="item-requester"></span></div>
+    <div><strong>Subject:</strong> <span id="item-subject"></span></div>
+  </section>
+
+  <section class="chassis-thread" id="thread">
+    <p class="chassis-empty">Loading thread…</p>
+  </section>
+
+  <p id="typing-indicator" class="chassis-hint" hidden></p>
+
+  <section class="chassis-composer">
+    <div class="chassis-composer__toggle">
+      <label>
+        <input type="checkbox" id="is-internal">
+        Internal note (never sent to requester)
+      </label>
+    </div>
+    <textarea id="composer-body" placeholder="Write a reply or internal note…" rows="4"></textarea>
+    <div class="chassis-composer__actions">
+      <button id="send-btn" type="button">Send</button>
+    </div>
+  </section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>

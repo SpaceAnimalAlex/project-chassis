@@ -1,0 +1,16 @@
+{{/* Shared nav fragment, included by queue.html and item_detail.html.
+     Each page file is otherwise a standalone document — see the comment
+     in router.go about why there's no wrapping base-layout template. */}}
+{{define "nav"}}
+<header class="chassis-nav">
+  <a class="chassis-nav__brand" href="/">Chassis</a>
+  <span class="chassis-nav__status" id="conn-status" title="Connection status">●</span>
+  <span id="nav-user" class="chassis-hint"></span>
+  <button id="nav-devices-btn" type="button" title="Manage signed-in devices">Devices</button>
+  <button id="nav-logout-btn" type="button">Sign out</button>
+</header>
+<div id="devices-panel" class="chassis-lock-warning" hidden>
+  <ul id="devices-list" class="chassis-session-list"></ul>
+  <button id="logout-others-btn" type="button">Sign out all other devices</button>
+</div>
+{{end}}
