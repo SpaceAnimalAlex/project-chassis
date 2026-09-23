@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-test:
+    name: Build & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          check-latest: true
+
+      - name: Verify Code with go vet
+        run: go vet ./...
+
+      - name: Run Test Suite
+        run: go test -v -race ./...
+        if: matrix.os != 'windows-latest' # -race requires CGO on Windows; pure-go tests run below
+
+      - name: Run Test Suite (Windows)
+        run: go test -v ./...
+        if: matrix.os == 'windows-latest'
+
+      - name: Build Standalone Static Binary
+        env:
+          CGO_ENABLED: '0'
+        run: go build -v -ldflags="-s -w" ./cmd/chassis
