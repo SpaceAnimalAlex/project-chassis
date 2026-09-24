@@ -147,12 +147,18 @@ func (w *SyncWorker) syncOnce(ctx context.Context) error {
 }
 
 func (w *SyncWorker) ingestMessage(ctx context.Context, msg InboundMessage) error {
+	return IngestInbound(ctx, w.repo, w.threader, w.notifier, w.defaultPrefix, msg)
+}
+
+// IngestInbound transactionally ingests an inbound message (email, voicemail audio/transcript)
+// into Chassis with deduplication, thread correlation, status reversal, audit logging,
+// and real-time SSE stream notification.
+func IngestInbound(ctx context.Context, repo *db.Repository, threader *Threader, notifier core.Notifier, defaultPrefix string, msg InboundMessage) error {
 	// First-pass deduplication: if external_message_id was already ingested, skip entirely
 	if msg.ExternalMessageID != "" {
 		var exists int
-		err := w.repo.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM thread_messages WHERE external_message_id = ?", msg.ExternalMessageID).Scan(&exists)
+		err := repo.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM thread_messages WHERE external_message_id = ?", msg.ExternalMessageID).Scan(&exists)
 		if err == nil && exists > 0 {
-			w.logger.Debug("Message already ingested, skipping", "message_id", msg.ExternalMessageID)
 			return nil
 		}
 	}
@@ -165,8 +171,8 @@ func (w *SyncWorker) ingestMessage(ctx context.Context, msg InboundMessage) erro
 		body = "(No content)"
 	}
 
-	// Run correlation heuristic
-	corr, err := w.threader.Correlate(ctx, msg)
+	// Run correlation heuristic (Stage 0 phone -> Stage 1 headers -> Stage 2 subject -> Stage 3 new item)
+	corr, err := threader.Correlate(ctx, msg)
 	if err != nil {
 		return fmt.Errorf("correlation failed: %w", err)
 	}
@@ -174,26 +180,58 @@ func (w *SyncWorker) ingestMessage(ctx context.Context, msg InboundMessage) erro
 	var notifiedMsg *core.ThreadMessage
 	var notifiedWorkItemID int64
 
-	err = w.repo.DB().WithTx(ctx, func(tx *sql.Tx) error {
+	err = repo.DB().WithTx(ctx, func(tx *sql.Tx) error {
 		var workItemID int64
 
 		if corr.Stage == "NEW_ITEM" {
+			prefix := defaultPrefix
+			if prefix == "" {
+				prefix = "HD"
+			}
 			// Generate new item code, e.g. HD-1001
-			code, err := w.generateItemCode(ctx, tx, w.defaultPrefix)
+			code, err := generateItemCode(ctx, tx, prefix)
 			if err != nil {
 				return fmt.Errorf("failed to generate item code: %w", err)
 			}
 
 			senderName := msg.SenderName
 			if senderName == "" {
-				senderName = msg.SenderEmail
+				if msg.SenderEmail != "" {
+					senderName = msg.SenderEmail
+				} else if msg.SenderPhone != "" {
+					senderName = msg.SenderPhone
+				} else {
+					senderName = "Unknown Requester"
+				}
+			}
+
+			senderEmail := msg.SenderEmail
+			if senderEmail == "" && msg.SenderPhone != "" {
+				senderEmail = msg.SenderPhone
+			}
+
+			// Check if sender matches an existing contact or organization
+			var contactID, orgID sql.NullInt64
+			var queryVal, chType string
+			if msg.SenderPhone != "" {
+				queryVal = core.NormalizePhone(msg.SenderPhone)
+				chType = "PHONE"
+			} else if msg.SenderEmail != "" {
+				queryVal = core.NormalizeEmail(msg.SenderEmail)
+				chType = "EMAIL"
+			}
+			if queryVal != "" {
+				_ = tx.QueryRowContext(ctx, `
+					SELECT contact_id, organization_id FROM communication_channels
+					WHERE channel_type = ? AND value = ? LIMIT 1;
+				`, chType, queryVal).Scan(&contactID, &orgID)
 			}
 
 			insertItem := `
-				INSERT INTO work_items (item_code, domain_type, requester_name, requester_email, status, priority, subject, summary)
-				VALUES (?, 'IT', ?, ?, 'NEW', 'NORMAL', ?, ?);
+				INSERT INTO work_items (item_code, domain_type, requester_name, requester_email, contact_id, organization_id, status, priority, subject, summary)
+				VALUES (?, 'IT', ?, ?, ?, ?, 'NEW', 'NORMAL', ?, ?);
 			`
-			res, err := tx.ExecContext(ctx, insertItem, code, senderName, msg.SenderEmail, msg.Subject, body)
+			res, err := tx.ExecContext(ctx, insertItem, code, senderName, senderEmail, contactID, orgID, msg.Subject, body)
 			if err != nil {
 				return fmt.Errorf("failed to create work item: %w", err)
 			}
@@ -209,7 +247,11 @@ func (w *SyncWorker) ingestMessage(ctx context.Context, msg InboundMessage) erro
 			VALUES (?, NULL, ?, ?, 0, ?)
 			ON CONFLICT(external_message_id) DO NOTHING;
 		`
-		res, err := tx.ExecContext(ctx, insertMsg, workItemID, msg.SenderEmail, body, msg.ExternalMessageID)
+		sender := msg.SenderEmail
+		if sender == "" && msg.SenderPhone != "" {
+			sender = msg.SenderPhone
+		}
+		res, err := tx.ExecContext(ctx, insertMsg, workItemID, sender, body, msg.ExternalMessageID)
 		if err != nil {
 			return fmt.Errorf("failed to insert thread message: %w", err)
 		}
@@ -226,7 +268,7 @@ func (w *SyncWorker) ingestMessage(ctx context.Context, msg InboundMessage) erro
 			ID:                msgID,
 			WorkItemID:        workItemID,
 			AuthorUserID:      nil,
-			SenderEmail:       msg.SenderEmail,
+			SenderEmail:       sender,
 			Body:              body,
 			IsInternal:        false,
 			ExternalMessageID: &extID,
@@ -265,15 +307,14 @@ func (w *SyncWorker) ingestMessage(ctx context.Context, msg InboundMessage) erro
 	}
 
 	// Alert active live SSE streams of this new inbound message
-	if w.notifier != nil && notifiedMsg != nil {
-		w.notifier.NotifyNewMessage(notifiedWorkItemID, *notifiedMsg)
+	if notifier != nil && notifiedMsg != nil {
+		notifier.NotifyNewMessage(notifiedWorkItemID, *notifiedMsg)
 	}
 
 	return nil
 }
 
-func (w *SyncWorker) generateItemCode(ctx context.Context, tx *sql.Tx, prefix string) (string, error) {
-	// Look up the highest existing numeric suffix for this prefix
+func generateItemCode(ctx context.Context, tx *sql.Tx, prefix string) (string, error) {
 	query := `SELECT COUNT(id) FROM work_items WHERE item_code LIKE ?;`
 	var count int
 	err := tx.QueryRowContext(ctx, query, prefix+"-%").Scan(&count)

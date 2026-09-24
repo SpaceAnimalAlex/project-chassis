@@ -46,6 +46,8 @@ type WorkItem struct {
 	RequesterName  string     `json:"requester_name"`
 	RequesterEmail string     `json:"requester_email"`
 	AssignedUserID *int64     `json:"assigned_user_id,omitempty"`
+	ContactID      *int64     `json:"contact_id,omitempty"`
+	OrganizationID *int64     `json:"organization_id,omitempty"`
 	Status         Status     `json:"status"`
 	Priority       Priority   `json:"priority"`
 	Subject        string     `json:"subject"`
@@ -57,19 +59,22 @@ type WorkItem struct {
 
 // WorkItemSummary is a lightweight projection for queue triage views.
 type WorkItemSummary struct {
-	ID             int64      `json:"id"`
-	ItemCode       string     `json:"item_code"`
-	DomainType     DomainType `json:"domain_type"`
-	RequesterName  string     `json:"requester_name"`
-	RequesterEmail string     `json:"requester_email"`
-	AssignedUserID *int64     `json:"assigned_user_id,omitempty"`
-	AssignedName   string     `json:"assigned_name,omitempty"`
-	Status         Status     `json:"status"`
-	Priority       Priority   `json:"priority"`
-	Subject        string     `json:"subject"`
-	MessageCount   int        `json:"message_count"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID               int64      `json:"id"`
+	ItemCode         string     `json:"item_code"`
+	DomainType       DomainType `json:"domain_type"`
+	RequesterName    string     `json:"requester_name"`
+	RequesterEmail   string     `json:"requester_email"`
+	AssignedUserID   *int64     `json:"assigned_user_id,omitempty"`
+	AssignedName     string     `json:"assigned_name,omitempty"`
+	ContactID        *int64     `json:"contact_id,omitempty"`
+	OrganizationID   *int64     `json:"organization_id,omitempty"`
+	OrganizationName string     `json:"organization_name,omitempty"`
+	Status           Status     `json:"status"`
+	Priority         Priority   `json:"priority"`
+	Subject          string     `json:"subject"`
+	MessageCount     int        `json:"message_count"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 // WorkItemDetail contains the full item, associated thread messages, linked assets, and audit records.
@@ -85,6 +90,8 @@ type QueueFilter struct {
 	DomainType     *DomainType `json:"domain_type,omitempty"`
 	Status         *Status     `json:"status,omitempty"`
 	AssignedUserID *int64      `json:"assigned_user_id,omitempty"`
+	ContactID      *int64      `json:"contact_id,omitempty"`
+	OrganizationID *int64      `json:"organization_id,omitempty"`
 	Priority       *Priority   `json:"priority,omitempty"`
 	SearchQuery    string      `json:"search_query,omitempty"`
 	Limit          int         `json:"limit,omitempty"`

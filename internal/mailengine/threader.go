@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/project-chassis/chassis/internal/core"
 	"github.com/project-chassis/chassis/internal/db"
 )
 
@@ -19,7 +20,7 @@ var (
 type CorrelationResult struct {
 	WorkItemID   int64
 	ItemCode     string
-	Stage        string // "HEADER_MATCH", "SUBJECT_REGEX", "NEW_ITEM"
+	Stage        string // "CONTACT_PHONE_MATCH", "HEADER_MATCH", "SUBJECT_REGEX", "NEW_ITEM"
 	HeaderValue  string
 	SubjectValue string
 }
@@ -34,8 +35,51 @@ func NewThreader(database *db.DB) *Threader {
 	return &Threader{database: database}
 }
 
-// Correlate evaluates an inbound message across the 3-stage heuristic chain.
+// Correlate evaluates an inbound message across the 4-stage heuristic chain (Stage 0 phone -> Stage 1 headers -> Stage 2 subject regex -> Stage 3 new item).
 func (t *Threader) Correlate(ctx context.Context, msg InboundMessage) (CorrelationResult, error) {
+	// Stage 0: Non-Email Phone / Contact Correlation for Voice/Voicemail
+	// If the inbound message has a phone number (or SenderEmail formatted as a phone),
+	// correlate to the contact or organization's active open ticket if one exists.
+	phoneToMatch := msg.SenderPhone
+	if phoneToMatch == "" && strings.HasPrefix(strings.TrimSpace(msg.SenderEmail), "+") {
+		phoneToMatch = msg.SenderEmail
+	}
+	if phoneToMatch != "" {
+		normPhone := core.NormalizePhone(phoneToMatch)
+		if normPhone != "" {
+			query := `
+				SELECT w.id, w.item_code
+				FROM work_items w
+				WHERE (
+					w.contact_id IN (
+						SELECT contact_id FROM communication_channels WHERE channel_type = 'PHONE' AND value = ? AND contact_id IS NOT NULL
+					)
+					OR w.organization_id IN (
+						SELECT organization_id FROM communication_channels WHERE channel_type = 'PHONE' AND value = ? AND organization_id IS NOT NULL
+					)
+				)
+				AND w.status IN ('NEW', 'OPEN', 'PENDING_USER')
+				ORDER BY w.updated_at DESC
+				LIMIT 1;
+			`
+			var itemID int64
+			var itemCode string
+			err := t.database.QueryRowContext(ctx, query, normPhone, normPhone).Scan(&itemID, &itemCode)
+			if err == nil {
+				return CorrelationResult{
+					WorkItemID:   itemID,
+					ItemCode:     itemCode,
+					Stage:        "CONTACT_PHONE_MATCH",
+					HeaderValue:  normPhone,
+					SubjectValue: "Active Open Ticket Match",
+				}, nil
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return CorrelationResult{}, err
+			}
+		}
+	}
+
 	// Stage 1: Direct In-Reply-To & References Header Matching
 	var headerCandidates []string
 	if msg.InReplyTo != "" {

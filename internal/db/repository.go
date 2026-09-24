@@ -50,6 +50,14 @@ func (r *Repository) ListQueue(ctx context.Context, filter core.QueueFilter) ([]
 		conditions = append(conditions, "w.priority = ?")
 		args = append(args, *filter.Priority)
 	}
+	if filter.ContactID != nil {
+		conditions = append(conditions, "w.contact_id = ?")
+		args = append(args, *filter.ContactID)
+	}
+	if filter.OrganizationID != nil {
+		conditions = append(conditions, "w.organization_id = ?")
+		args = append(args, *filter.OrganizationID)
+	}
 	if filter.SearchQuery != "" {
 		like := "%" + filter.SearchQuery + "%"
 		conditions = append(conditions, "(w.item_code LIKE ? OR w.subject LIKE ? OR w.requester_name LIKE ? OR w.requester_email LIKE ?)")
@@ -71,11 +79,13 @@ func (r *Repository) ListQueue(ctx context.Context, filter core.QueueFilter) ([]
 		SELECT 
 			w.id, w.item_code, w.domain_type, w.requester_name, w.requester_email,
 			w.assigned_user_id, COALESCE(u.full_name, ''),
+			w.contact_id, w.organization_id, COALESCE(o.name, ''),
 			w.status, w.priority, w.subject,
 			(SELECT COUNT(*) FROM thread_messages tm WHERE tm.work_item_id = w.id) AS msg_count,
 			w.created_at, w.updated_at
 		FROM work_items w
 		LEFT JOIN users u ON w.assigned_user_id = u.id
+		LEFT JOIN organizations o ON w.organization_id = o.id
 		%s
 		ORDER BY 
 			CASE w.priority 
@@ -101,13 +111,14 @@ func (r *Repository) ListQueue(ctx context.Context, filter core.QueueFilter) ([]
 	for rows.Next() {
 		var s core.WorkItemSummary
 		var requesterName sql.NullString
-		var assignedID sql.NullInt64
-		var assignedName string
+		var assignedID, contactID, orgID sql.NullInt64
+		var assignedName, orgName string
 		var createdAtStr, updatedAtStr string
 
 		err := rows.Scan(
 			&s.ID, &s.ItemCode, &s.DomainType, &requesterName, &s.RequesterEmail,
 			&assignedID, &assignedName,
+			&contactID, &orgID, &orgName,
 			&s.Status, &s.Priority, &s.Subject,
 			&s.MessageCount,
 			&createdAtStr, &updatedAtStr,
@@ -123,6 +134,13 @@ func (r *Repository) ListQueue(ctx context.Context, filter core.QueueFilter) ([]
 			s.AssignedUserID = &assignedID.Int64
 		}
 		s.AssignedName = assignedName
+		if contactID.Valid {
+			s.ContactID = &contactID.Int64
+		}
+		if orgID.Valid {
+			s.OrganizationID = &orgID.Int64
+		}
+		s.OrganizationName = orgName
 		s.CreatedAt = parseTime(createdAtStr)
 		s.UpdatedAt = parseTime(updatedAtStr)
 
@@ -146,7 +164,8 @@ func (r *Repository) getItemByQuery(ctx context.Context, where string, arg any) 
 	query := fmt.Sprintf(`
 		SELECT 
 			w.id, w.item_code, w.domain_type, w.requester_name, w.requester_email,
-			w.assigned_user_id, w.status, w.priority, w.subject, w.summary,
+			w.assigned_user_id, w.contact_id, w.organization_id,
+			w.status, w.priority, w.subject, w.summary,
 			w.created_at, w.updated_at, w.resolved_at
 		FROM work_items w
 		WHERE %s;
@@ -154,12 +173,13 @@ func (r *Repository) getItemByQuery(ctx context.Context, where string, arg any) 
 
 	var item core.WorkItem
 	var reqName, summary, resolvedAtStr sql.NullString
-	var assignedID sql.NullInt64
+	var assignedID, contactID, orgID sql.NullInt64
 	var createdAtStr, updatedAtStr string
 
 	err := r.db.QueryRowContext(ctx, query, arg).Scan(
 		&item.ID, &item.ItemCode, &item.DomainType, &reqName, &item.RequesterEmail,
-		&assignedID, &item.Status, &item.Priority, &item.Subject, &summary,
+		&assignedID, &contactID, &orgID,
+		&item.Status, &item.Priority, &item.Subject, &summary,
 		&createdAtStr, &updatedAtStr, &resolvedAtStr,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -177,6 +197,12 @@ func (r *Repository) getItemByQuery(ctx context.Context, where string, arg any) 
 	}
 	if assignedID.Valid {
 		item.AssignedUserID = &assignedID.Int64
+	}
+	if contactID.Valid {
+		item.ContactID = &contactID.Int64
+	}
+	if orgID.Valid {
+		item.OrganizationID = &orgID.Int64
 	}
 	item.CreatedAt = parseTime(createdAtStr)
 	item.UpdatedAt = parseTime(updatedAtStr)
@@ -330,12 +356,13 @@ func (r *Repository) CreateItem(ctx context.Context, item *core.WorkItem, initia
 
 	err := r.db.WithTx(ctx, func(tx *sql.Tx) error {
 		insertItem := `
-			INSERT INTO work_items (item_code, domain_type, requester_name, requester_email, assigned_user_id, status, priority, subject, summary)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+			INSERT INTO work_items (item_code, domain_type, requester_name, requester_email, assigned_user_id, contact_id, organization_id, status, priority, subject, summary)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 		`
 		res, err := tx.ExecContext(ctx, insertItem,
 			item.ItemCode, item.DomainType, item.RequesterName, item.RequesterEmail,
-			item.AssignedUserID, item.Status, item.Priority, item.Subject, item.Summary,
+			item.AssignedUserID, item.ContactID, item.OrganizationID,
+			item.Status, item.Priority, item.Subject, item.Summary,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to insert work item: %w", err)

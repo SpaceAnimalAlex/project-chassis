@@ -45,13 +45,33 @@ function initQueuePage() {
   const body = document.getElementById("queue-body");
   const search = document.getElementById("search");
   const statusFilter = document.getElementById("filter-status");
+  const orgFilter = document.getElementById("filter-org");
+  const orgDatalist = document.getElementById("org-suggestions");
   let rows = [];
   let selected = 0;
+  let orgNameToId = {};
+
+  // Seeded from the incoming-call banner's "View ticket(s)" link (see
+  // renderIncomingCall in initNav), which can't go through the name-based
+  // org filter above since it only knows the organization's id, not its name.
+  const initialParams = new URLSearchParams(window.location.search);
+  const seededOrgID = initialParams.get("organization_id");
+
+  bindOrgSuggestions(orgFilter, orgDatalist, (orgs) => {
+    orgNameToId = {};
+    orgs.forEach((o) => { orgNameToId[o.name] = o.id; });
+  });
+  orgFilter.addEventListener("change", load);
 
   async function load() {
     const params = new URLSearchParams();
     if (search.value) params.set("q", search.value);
     if (statusFilter.value) params.set("status", statusFilter.value);
+    if (orgFilter.value && orgNameToId[orgFilter.value]) {
+      params.set("organization_id", orgNameToId[orgFilter.value]);
+    } else if (seededOrgID) {
+      params.set("organization_id", seededOrgID);
+    }
     try {
       rows = await api("/api/queue?" + params.toString());
       markConnStatus(true);
@@ -127,6 +147,11 @@ function initItemPage() {
   const statusSelect = document.getElementById("status-select");
   const assignBtn = document.getElementById("assign-btn");
   const lockWarning = document.getElementById("lock-warning");
+  const promoteBtn = document.getElementById("promote-btn");
+  const promoteForm = document.getElementById("promote-form");
+  const promoteOrgInput = document.getElementById("promote-org");
+  const promoteRoleInput = document.getElementById("promote-role");
+  const promoteOrgDatalist = document.getElementById("org-suggestions");
 
   const TRANSITIONS = ["NEW", "OPEN", "PENDING_USER", "RESOLVED", "CLOSED"];
 
@@ -155,6 +180,13 @@ function initItemPage() {
     thread.innerHTML = messages.length
       ? messages.map(renderMessage).join("")
       : '<p class="chassis-empty">No messages yet.</p>';
+
+    // Once a requester is linked to a contact, there's nothing left to
+    // promote — hide the action rather than let a second click re-promote
+    // (PromoteRequesterToContact is written to be safe either way, but the
+    // button implies "do this," not "do this again").
+    promoteBtn.hidden = !!detail.item.contact_id;
+    if (detail.item.contact_id) promoteForm.hidden = true;
   }
 
   function renderMessage(m) {
@@ -194,6 +226,34 @@ function initItemPage() {
       await load();
     } catch (e) {
       alert("Could not assign: " + e.message);
+    }
+  });
+
+  bindOrgSuggestions(promoteOrgInput, promoteOrgDatalist);
+
+  promoteBtn.addEventListener("click", () => {
+    promoteForm.hidden = !promoteForm.hidden;
+  });
+
+  document.getElementById("promote-cancel-btn").addEventListener("click", () => {
+    promoteForm.hidden = true;
+  });
+
+  document.getElementById("promote-confirm-btn").addEventListener("click", async () => {
+    try {
+      await api(`/api/items/${id}/promote-to-contact`, {
+        method: "POST",
+        body: JSON.stringify({
+          organization_name: promoteOrgInput.value.trim(),
+          role_title: promoteRoleInput.value.trim(),
+        }),
+      });
+      promoteForm.hidden = true;
+      promoteOrgInput.value = "";
+      promoteRoleInput.value = "";
+      await load();
+    } catch (e) {
+      alert("Could not promote requester: " + e.message);
     }
   });
 
@@ -362,9 +422,85 @@ async function initNav() {
     await api("/api/auth/logout-others", { method: "POST" });
     devicesPanel.hidden = true;
   });
+
+  openOperatorStream();
+}
+
+// --- Operator-wide live stream: incoming-call screen-pop ---
+// One EventSource per page load, opened from the app shell (not per-ticket
+// like the item-detail stream) — see internal/web/stream.Hub.operatorSubs
+// and handlers.VoiceIncoming for the server side.
+
+function openOperatorStream() {
+  const es = new EventSource("/api/stream/operator");
+  es.addEventListener("incoming_call", (e) => renderIncomingCall(JSON.parse(e.data)));
+  // Best-effort: a dropped operator stream doesn't affect markConnStatus,
+  // which reflects the per-item stream's health on the ticket detail page.
+}
+
+function renderIncomingCall(call) {
+  const banner = document.getElementById("incoming-call-banner");
+  const text = document.getElementById("incoming-call-text");
+  const viewLink = document.getElementById("incoming-call-view-link");
+  if (!banner) return;
+
+  let label;
+  if (call.contact) {
+    label = call.contact.full_name;
+    if (call.primary_affiliation) {
+      label += ` — ${call.primary_affiliation.organization_name}` +
+        (call.primary_affiliation.role_title ? ` (${call.primary_affiliation.role_title})` : "");
+    }
+  } else if (call.organization) {
+    label = `${call.organization.name} (main line)`;
+  } else {
+    label = "Unknown caller";
+  }
+  text.textContent = `☎ ${label} — ${call.caller_number}`;
+
+  const items = call.active_work_items || [];
+  if (items.length === 1) {
+    viewLink.href = `/items/${items[0].id}`;
+    viewLink.textContent = "View ticket";
+    viewLink.hidden = false;
+  } else if (items.length > 1 && call.organization) {
+    viewLink.href = `/?organization_id=${call.organization.id}`;
+    viewLink.textContent = `View ${items.length} tickets`;
+    viewLink.hidden = false;
+  } else {
+    viewLink.hidden = true;
+  }
+
+  banner.hidden = false;
 }
 
 // --- shared helpers ---
+
+// bindOrgSuggestions wires a text input to a <datalist>, populated from
+// GET /api/organizations?q= as the user types. Used by both the queue page's
+// organization filter and the item page's "Promote to Contact" form — the
+// only two places in the UI that need an organization typeahead, so this
+// stays a small shared helper rather than a new component. onResults is
+// optional and receives the raw org objects (queue filter uses it to build a
+// name->id map for the organization_id query param; the promote form doesn't
+// need one, since it submits the organization by name).
+function bindOrgSuggestions(input, datalist, onResults) {
+  input.addEventListener("input", debounce(async () => {
+    const q = input.value.trim();
+    if (!q) {
+      datalist.innerHTML = "";
+      onResults?.([]);
+      return;
+    }
+    try {
+      const orgs = await api("/api/organizations?q=" + encodeURIComponent(q));
+      datalist.innerHTML = orgs.map((o) => `<option value="${escapeHtml(o.name)}"></option>`).join("");
+      onResults?.(orgs);
+    } catch {
+      // typeahead is a courtesy; a failed lookup shouldn't block typing
+    }
+  }, 250));
+}
 
 function escapeHtml(s) {
   const div = document.createElement("div");
@@ -397,6 +533,9 @@ function throttle(fn, ms) {
 document.addEventListener("DOMContentLoaded", () => {
   const page = document.body.dataset.page;
   if (page === "login") { initLoginPage(); return; }
+  document.getElementById("incoming-call-dismiss-btn")?.addEventListener("click", () => {
+    document.getElementById("incoming-call-banner").hidden = true;
+  });
   initNav();
   if (page === "queue") initQueuePage();
   if (page === "item") initItemPage();

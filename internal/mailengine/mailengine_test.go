@@ -203,3 +203,87 @@ func TestSyncWorkerIngestion(t *testing.T) {
 func ptr[T any](v T) *T {
 	return &v
 }
+
+func TestStage0PhoneCorrelation(t *testing.T) {
+	database, repo := setupTestRepo(t)
+	defer database.Close()
+	ctx := context.Background()
+
+	// 1. Create a Contact with a phone channel
+	contact := &core.Contact{
+		FullName: "Robert Green",
+		Channels: []core.CommunicationChannel{
+			{
+				ChannelType: core.ChannelPhone,
+				Value:       "(814) 555-7777",
+				IsPrimary:   true,
+			},
+		},
+	}
+	createdContact, err := repo.CreateContact(ctx, contact)
+	if err != nil {
+		t.Fatalf("CreateContact failed: %v", err)
+	}
+
+	// 2. Create an open work item linked to this contact
+	item := &core.WorkItem{
+		ItemCode:       "HD-3001",
+		DomainType:     core.DomainIT,
+		RequesterName:  createdContact.FullName,
+		RequesterEmail: "rgreen@example.org",
+		ContactID:      &createdContact.ID,
+		Status:         core.StatusPendingUser,
+		Subject:        "Network drop dead in lab",
+		Priority:       core.PriorityNormal,
+	}
+	createdItem, err := repo.CreateItem(ctx, item, nil)
+	if err != nil {
+		t.Fatalf("CreateItem failed: %v", err)
+	}
+
+	threader := NewThreader(database)
+	notifier := &mockNotifier{}
+
+	// 3. Test Stage 0 Correlation: Voicemail from caller's phone number
+	voicemailMsg := InboundMessage{
+		ExternalMessageID: "vm-call-99901",
+		SenderPhone:       "814.555.7777",
+		Subject:           "Voicemail from Robert Green",
+		BodyText:          "Hey, I replaced the patch cable like you suggested but it's still orange.",
+	}
+
+	corr, err := threader.Correlate(ctx, voicemailMsg)
+	if err != nil {
+		t.Fatalf("Correlate failed: %v", err)
+	}
+	if corr.Stage != "CONTACT_PHONE_MATCH" {
+		t.Fatalf("expected CONTACT_PHONE_MATCH, got %s", corr.Stage)
+	}
+	if corr.WorkItemID != createdItem.ID {
+		t.Fatalf("expected work item ID %d, got %d", createdItem.ID, corr.WorkItemID)
+	}
+
+	// 4. Test IngestInbound attaches to existing open ticket and re-opens from PENDING_USER to OPEN
+	err = IngestInbound(ctx, repo, threader, notifier, "HD", voicemailMsg)
+	if err != nil {
+		t.Fatalf("IngestInbound failed: %v", err)
+	}
+
+	// Verify work item updated to OPEN and thread message appended
+	detail, err := repo.GetItem(ctx, createdItem.ID)
+	if err != nil {
+		t.Fatalf("GetItem failed: %v", err)
+	}
+	if detail.Item.Status != core.StatusOpen {
+		t.Errorf("expected status OPEN after requester reply, got %s", detail.Item.Status)
+	}
+	if len(detail.Messages) != 1 {
+		t.Fatalf("expected 1 thread message, got %d", len(detail.Messages))
+	}
+	if detail.Messages[0].Body != voicemailMsg.BodyText {
+		t.Errorf("unexpected message body: %s", detail.Messages[0].Body)
+	}
+	if len(notifier.notifications) != 1 {
+		t.Errorf("expected 1 SSE broadcast notification, got %d", len(notifier.notifications))
+	}
+}

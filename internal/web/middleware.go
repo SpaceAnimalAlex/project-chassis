@@ -92,6 +92,11 @@ func PublicPath(r *http.Request) bool {
 		return true
 	case p == "/api/health":
 		return true
+	case p == "/api/webhooks/voice/incoming":
+		// Authenticated by its own shared secret (VoiceIncoming checks
+		// X-Webhook-Secret), not a session cookie — a PBX/SIP provider has
+		// neither an operator session nor any way to obtain one.
+		return true
 	case strings.HasPrefix(p, "/static/"):
 		return true
 	default:

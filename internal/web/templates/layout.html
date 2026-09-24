@@ -13,4 +13,14 @@
   <ul id="devices-list" class="chassis-session-list"></ul>
   <button id="logout-others-btn" type="button">Sign out all other devices</button>
 </div>
+{{/* Global, operator-wide incoming-call screen-pop — fed by the SSE channel
+     opened once per page load (see initNav/openOperatorStream in app.js),
+     not the per-ticket stream a ticket detail page also opens. */}}
+<div id="incoming-call-banner" class="chassis-call-banner" hidden>
+  <span id="incoming-call-text"></span>
+  <div class="chassis-call-banner__actions">
+    <a id="incoming-call-view-link" href="#" hidden>View ticket</a>
+    <button id="incoming-call-dismiss-btn" type="button">Dismiss</button>
+  </div>
+</div>
 {{end}}

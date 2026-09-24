@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"os"
 
 	"github.com/project-chassis/chassis/internal/core"
 	"github.com/project-chassis/chassis/internal/implement"
@@ -28,13 +29,17 @@ var templateFS embed.FS
 // static assets, and the server-rendered page shells. Every route beyond the
 // static bundle is registered with an explicit method, per Go 1.22+
 // http.ServeMux pattern matching (no third-party router).
-func NewRouter(service core.WorkItemService, authSvc core.AuthService, registry *implement.Registry, tracker *presence.Tracker, hub *stream.Hub, logger *slog.Logger) (http.Handler, error) {
+func NewRouter(service core.WorkItemService, authSvc core.AuthService, contacts core.ContactService, ingestor core.InboundIngestor, registry *implement.Registry, tracker *presence.Tracker, hub *stream.Hub, logger *slog.Logger) (http.Handler, error) {
 	templates, err := template.ParseFS(templateFS, "templates/*.html")
 	if err != nil {
 		return nil, err
 	}
 
-	h := handlers.New(service, authSvc, registry, tracker, hub, templates, logger)
+	h := handlers.New(service, authSvc, contacts, ingestor, registry, tracker, hub, templates, logger)
+	// Read directly rather than widening NewRouter's already-long parameter
+	// list for one optional webhook credential; an empty secret makes
+	// VoiceIncoming reject every request (see handlers/telephony.go).
+	h.VoiceWebhookSecret = os.Getenv("CHASSIS_VOICE_WEBHOOK_SECRET")
 
 	mux := http.NewServeMux()
 
@@ -63,6 +68,7 @@ func NewRouter(service core.WorkItemService, authSvc core.AuthService, registry 
 	mux.HandleFunc("GET /api/implements", h.ListImplements)
 
 	mux.HandleFunc("GET /api/queue", h.ListQueue)
+	mux.HandleFunc("GET /api/organizations", h.ListOrganizations)
 
 	mux.HandleFunc("GET /api/items/{id}", h.GetItem)
 	mux.HandleFunc("POST /api/items/{id}/transition", h.TransitionStatus)
@@ -70,12 +76,20 @@ func NewRouter(service core.WorkItemService, authSvc core.AuthService, registry 
 	mux.HandleFunc("POST /api/items/{id}/assign", h.AssignItem)
 	mux.HandleFunc("POST /api/items/{id}/assets/{assetID}", h.LinkAsset)
 	mux.HandleFunc("DELETE /api/items/{id}/assets/{assetID}", h.UnlinkAsset)
+	mux.HandleFunc("POST /api/items/{id}/promote-to-contact", h.PromoteToContact)
 
 	mux.HandleFunc("POST /api/items/{id}/presence", h.Heartbeat)
 	mux.HandleFunc("DELETE /api/items/{id}/presence", h.ReleasePresence)
 
 	mux.HandleFunc("GET /api/items/{id}/stream", h.Stream)
 	mux.HandleFunc("POST /api/items/{id}/typing", h.Typing)
+
+	mux.HandleFunc("GET /api/stream/operator", h.OperatorStream)
+
+	// Telephony ingress — authenticated by its own shared secret (see
+	// VoiceIncoming), not an operator session, so it must bypass Auth's
+	// cookie check; PublicPath in middleware.go carries this exemption.
+	mux.HandleFunc("POST /api/webhooks/voice/incoming", h.VoiceIncoming)
 
 	return Chain(mux, Recover(logger), Log(logger), CSRFOriginCheck(), Auth(authSvc, PublicPath)), nil
 }

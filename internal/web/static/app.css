@@ -277,3 +277,25 @@ button:hover { filter: brightness(0.95); }
   border-bottom: 1px solid var(--border);
   font-size: 0.85rem;
 }
+
+.chassis-call-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.6rem 1.25rem;
+  background: var(--internal-bg);
+  border-bottom: 1px solid var(--internal-border);
+  font-size: 0.9rem;
+}
+
+.chassis-call-banner__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  white-space: nowrap;
+}
+
+.chassis-call-banner__actions a {
+  color: var(--accent);
+}

@@ -154,6 +154,51 @@ func (h *Handlers) AssignItem(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+type promoteToContactRequest struct {
+	OrganizationName string `json:"organization_name"`
+	RoleTitle        string `json:"role_title"`
+}
+
+// PromoteToContact handles POST /api/items/{id}/promote-to-contact — turns
+// a ticket's requester_name/requester_email snapshot into a persistent
+// core.Contact, optionally affiliated with an organization. Both fields are
+// optional per the Round 3 addendum sign-off: most promoted contacts (an
+// individual constituent, a parent, a homeowner) have no organization, and
+// requiring one on every promotion would reintroduce the friction the
+// manual-promotion design exists to avoid.
+func (h *Handlers) PromoteToContact(w http.ResponseWriter, r *http.Request) {
+	id, err := pathInt64(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid item id")
+		return
+	}
+
+	var req promoteToContactRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	var orgName, roleTitle *string
+	if req.OrganizationName != "" {
+		orgName = &req.OrganizationName
+	}
+	if req.RoleTitle != "" {
+		roleTitle = &req.RoleTitle
+	}
+
+	contact, err := h.Contacts.PromoteRequesterToContact(r.Context(), id, orgName, roleTitle)
+	switch {
+	case errors.Is(err, core.ErrItemNotFound):
+		writeError(w, http.StatusNotFound, "work item not found")
+	case err != nil:
+		h.Logger.Error("promote to contact failed", "id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to promote requester to contact")
+	default:
+		writeJSON(w, http.StatusCreated, contact)
+	}
+}
+
 // --- live presence / collision prevention ---
 
 type heartbeatRequest struct {

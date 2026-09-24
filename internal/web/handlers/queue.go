@@ -19,21 +19,24 @@ import (
 
 // Handlers bundles every dependency the HTTP layer needs.
 type Handlers struct {
-	Service   core.WorkItemService
-	Auth      core.AuthService
-	Registry  *implement.Registry
-	Presence  *presence.Tracker
-	Hub       *stream.Hub
-	Templates *template.Template
-	Logger    *slog.Logger
+	Service            core.WorkItemService
+	Auth               core.AuthService
+	Contacts           core.ContactService
+	Ingestor           core.InboundIngestor
+	Registry           *implement.Registry
+	Presence           *presence.Tracker
+	Hub                *stream.Hub
+	Templates          *template.Template
+	Logger             *slog.Logger
+	VoiceWebhookSecret string // shared secret for POST /api/webhooks/voice/incoming; empty disables the endpoint
 }
 
 // New constructs the shared Handlers bundle.
-func New(service core.WorkItemService, authSvc core.AuthService, registry *implement.Registry, tracker *presence.Tracker, hub *stream.Hub, templates *template.Template, logger *slog.Logger) *Handlers {
+func New(service core.WorkItemService, authSvc core.AuthService, contacts core.ContactService, ingestor core.InboundIngestor, registry *implement.Registry, tracker *presence.Tracker, hub *stream.Hub, templates *template.Template, logger *slog.Logger) *Handlers {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Handlers{Service: service, Auth: authSvc, Registry: registry, Presence: tracker, Hub: hub, Templates: templates, Logger: logger}
+	return &Handlers{Service: service, Auth: authSvc, Contacts: contacts, Ingestor: ingestor, Registry: registry, Presence: tracker, Hub: hub, Templates: templates, Logger: logger}
 }
 
 // --- shared helpers ---
@@ -98,6 +101,16 @@ func (h *Handlers) ListQueue(w http.ResponseWriter, r *http.Request) {
 	if v := q.Get("assigned_user_id"); v != "" {
 		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
 			filter.AssignedUserID = &id
+		}
+	}
+	if v := q.Get("organization_id"); v != "" {
+		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
+			filter.OrganizationID = &id
+		}
+	}
+	if v := q.Get("contact_id"); v != "" {
+		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
+			filter.ContactID = &id
 		}
 	}
 	if v := q.Get("limit"); v != "" {

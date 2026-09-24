@@ -95,7 +95,11 @@ func run(ctx context.Context, logger *slog.Logger, dbPath, addr string) error {
 	// see internal/web/stream for why a live viewer needs to hear from both.
 	hub := stream.NewHub()
 
-	handler, err := web.NewRouter(repo, repo, implement.DefaultRegistry, tracker, hub, logger)
+	prefix := envOr("CHASSIS_ITEM_PREFIX", "HD")
+	threader := mailengine.NewThreader(database)
+	ingestor := mailengine.NewIngestor(repo, threader, hub, prefix)
+
+	handler, err := web.NewRouter(repo, repo, repo, ingestor, implement.DefaultRegistry, tracker, hub, logger)
 	if err != nil {
 		return err
 	}

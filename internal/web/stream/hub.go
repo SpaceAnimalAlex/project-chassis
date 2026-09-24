@@ -29,14 +29,22 @@ const TypingTTL = 2500 * time.Millisecond
 // SSE connection for that item. It holds no history — a client that wasn't
 // connected when an event fired simply doesn't see it and falls back to the
 // regular GET /api/items/{id} on next load, same as before Round 2 existed.
+//
+// operatorSubs is a second, separate fan-out for events that aren't scoped
+// to any one work item (Round 3: incoming-call screen-pops) — every signed-in
+// operator's app shell holds one of these open, not per-ticket like subs.
 type Hub struct {
-	mu   sync.Mutex
-	subs map[int64]map[chan Event]struct{}
+	mu           sync.Mutex
+	subs         map[int64]map[chan Event]struct{}
+	operatorSubs map[chan Event]struct{}
 }
 
 // NewHub creates an empty broadcast hub.
 func NewHub() *Hub {
-	return &Hub{subs: make(map[int64]map[chan Event]struct{})}
+	return &Hub{
+		subs:         make(map[int64]map[chan Event]struct{}),
+		operatorSubs: make(map[chan Event]struct{}),
+	}
 }
 
 var _ core.Notifier = (*Hub)(nil)
@@ -99,6 +107,66 @@ func (h *Hub) NotifyNewMessage(workItemID int64, msg core.ThreadMessage) {
 		return
 	}
 	h.Publish(workItemID, "message", data)
+}
+
+// SubscribeOperator registers a new listener for operator-wide events (not
+// scoped to any single work item — e.g. incoming-call screen-pops). Callers
+// must call the returned cancel func (typically via defer) when their SSE
+// connection ends, same contract as Subscribe.
+func (h *Hub) SubscribeOperator() (<-chan Event, func()) {
+	ch := make(chan Event, 8)
+	h.mu.Lock()
+	h.operatorSubs[ch] = struct{}{}
+	h.mu.Unlock()
+
+	cancel := func() {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		if _, present := h.operatorSubs[ch]; present {
+			delete(h.operatorSubs, ch)
+			close(ch)
+		}
+	}
+	return ch, cancel
+}
+
+// PublishOperator sends an event to every currently-connected operator.
+// Same non-blocking-per-subscriber behavior as Publish: a stalled reader
+// drops the event rather than stalling the broadcaster or other operators.
+func (h *Hub) PublishOperator(name string, data []byte) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for ch := range h.operatorSubs {
+		select {
+		case ch <- Event{Name: name, Data: data}:
+		default:
+		}
+	}
+}
+
+// IncomingCallEvent is the payload broadcast to every operator when a call
+// hits POST /api/webhooks/voice/incoming (see handlers/telephony.go). It
+// wraps core.ContactService.ResolveCaller's result — the same
+// CallerIDResolution shape (Contact, Organization, PrimaryAffiliation,
+// AffiliatedContacts, ActiveWorkItems) — with the two fields specific to
+// this call that the resolution itself doesn't carry. Embedding rather than
+// re-declaring keeps this in lockstep with core.CallerIDResolution instead
+// of a hand-maintained shadow copy that can drift.
+type IncomingCallEvent struct {
+	CallID       string `json:"call_id"`
+	CallerNumber string `json:"caller_number"`
+	core.CallerIDResolution
+}
+
+// NotifyIncomingCall broadcasts a screen-pop to every connected operator.
+// Not part of core.Notifier — like typing pings, this is a live-UI courtesy
+// with no domain/DB representation, so it stays Hub-specific.
+func (h *Hub) NotifyIncomingCall(event IncomingCallEvent) {
+	data, err := json.Marshal(event)
+	if err != nil {
+		return
+	}
+	h.PublishOperator("incoming_call", data)
 }
 
 // typingPing is the payload broadcast for a "someone is typing" indicator.

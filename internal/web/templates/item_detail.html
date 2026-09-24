@@ -17,6 +17,7 @@
     <div class="chassis-item-actions">
       <select id="status-select"></select>
       <button id="assign-btn" type="button">Assign to me</button>
+      <button id="promote-btn" type="button" hidden>Promote to Contact</button>
     </div>
   </header>
 
@@ -24,6 +25,22 @@
     <div><strong>Requester:</strong> <span id="item-requester"></span></div>
     <div><strong>Subject:</strong> <span id="item-subject"></span></div>
   </section>
+
+  <div id="promote-form" class="chassis-lock-warning" hidden>
+    <label>
+      Organization (optional)
+      <input type="text" id="promote-org" list="org-suggestions" placeholder="e.g. Acme Metal Co." autocomplete="off">
+    </label>
+    <datalist id="org-suggestions"></datalist>
+    <label>
+      Role title (optional)
+      <input type="text" id="promote-role" placeholder="e.g. Plant Superintendent" autocomplete="off">
+    </label>
+    <div class="chassis-composer__actions">
+      <button id="promote-cancel-btn" type="button">Cancel</button>
+      <button id="promote-confirm-btn" type="button">Confirm</button>
+    </div>
+  </div>
 
   <section class="chassis-thread" id="thread">
     <p class="chassis-empty">Loading thread…</p>
